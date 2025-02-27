@@ -93,3 +93,118 @@
   )
 )
 
+
+
+;; Staking Mechanism with Block Height
+(define-public (stake-tokens 
+  (amount uint) 
+  (lock-period uint)
+)
+  (let 
+    (
+      ;; Current block height
+      (current-block (var-get current-block-height))
+
+      ;; Calculate unlock block
+      (unlock-block (+ current-block lock-period))
+    )
+    ;; Transfer tokens to contract
+    (try! (transfer amount (as-contract tx-sender)))
+
+    ;; Store staking information with explicit block height
+    (map-set staking-deposits tx-sender {
+      amount: amount,
+      stake-block: current-block,
+      unlock-block: unlock-block
+    })
+
+    (ok true)
+  )
+)
+
+;; Unstake Tokens with Block Height Check
+(define-public (unstake-tokens)
+  (let 
+    (
+      ;; Current block height
+      (current-block (var-get current-block-height))
+
+      ;; Retrieve staking information
+      (stake-info 
+        (unwrap! 
+          (map-get? staking-deposits tx-sender) 
+          (err u111)
+        )
+      )
+    )
+    ;; Check if unlock block has been reached
+    (asserts! 
+      (>= current-block (get unlock-block stake-info)) 
+      (err u112)
+    )
+
+    ;; Transfer staked tokens back
+    (try! 
+      (as-contract 
+        (ft-transfer? 
+          memecoin 
+          (get amount stake-info)
+          (as-contract tx-sender) 
+          tx-sender
+        )
+      )
+    )
+
+    ;; Remove staking record
+    (map-delete staking-deposits tx-sender)
+
+    (ok true)
+  )
+)
+
+(define-data-var next-proposal-id uint u0)
+
+
+(define-map governance-proposals 
+  {proposal-id: uint} 
+  {
+    proposer: principal,
+    description: (string-utf8 200),
+    votes-for: uint,
+    votes-against: uint,
+    is-active: bool,
+    proposal-block: uint,
+    voting-deadline: uint
+  }
+)
+
+
+;; Governance Proposal with Block Height
+(define-public (create-governance-proposal 
+  (description (string-utf8 200))
+  (voting-period uint)
+)
+  (let 
+    (
+      ;; Current block height
+      (current-block (var-get current-block-height))
+
+      ;; Calculate voting deadline
+      (voting-deadline (+ current-block voting-period))
+
+      ;; Generate proposal ID
+      (proposal-id (var-get next-proposal-id))
+    )
+    ;; Create proposal with explicit block height tracking
+    (map-set governance-proposals 
+      {proposal-id: proposal-id}
+      {
+        proposer: tx-sender,
+        description: description,
+        votes-for: u0,
+        votes-against: u0,
+        is-active: true,
+        proposal-block: current-block,
+        voting-deadline: voting-deadline
+      }
+    )
